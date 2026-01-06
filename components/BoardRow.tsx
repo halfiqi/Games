@@ -22,7 +22,7 @@ const BoardRow: React.FC<BoardRowProps> = ({ id, label, subLabel, board, onDelet
     disabled: !isClassification 
   });
 
-  const activeCols = board.classification;
+  const activeCols = board?.classification || [];
 
   return (
     <div className="flex gap-10 items-stretch min-h-[180px]">
@@ -70,7 +70,7 @@ const BoardRow: React.FC<BoardRowProps> = ({ id, label, subLabel, board, onDelet
                 key={col.id}
                 rowId={id}
                 colId={col.id}
-                items={board.grid[id]?.[col.id] || []}
+                items={board?.grid?.[id]?.[col.id] || []}
                 accentColor={COLUMN_COLORS[idx % COLUMN_COLORS.length]}
                 onDeleteCard={onDeleteCard}
               />

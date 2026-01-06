@@ -27,10 +27,10 @@ import { Share2, Check, Download, Upload, X, Copy, Info, FilePlus, ExternalLink,
 const isPoolTemplate = (id: string) => id.startsWith('p');
 const generateInstanceId = (baseId: string) => `inst-${baseId}-${Math.random().toString(36).substring(2, 9)}`;
 
-// Robust base64 for URLs
+// Robust base64 for URLs - using shorthands to keep URLs short
 const serializeBoard = (state: BoardState) => {
   try {
-    const data = { c: state.classification, g: state.grid };
+    const data = { c: state.classification || [], g: state.grid || {} };
     const json = JSON.stringify(data);
     return btoa(unescape(encodeURIComponent(json)))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -45,7 +45,10 @@ const deserializeBoard = (encoded: string): Partial<BoardState> | null => {
     const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
     const json = decodeURIComponent(escape(atob(base64)));
     const data = JSON.parse(json);
-    return { classification: data.c, grid: data.g };
+    return { 
+      classification: data.c || [], 
+      grid: data.g || { strategy: {}, mechanics: {}, ux: {}, theme: {} } 
+    };
   } catch (e) { 
     console.error("Failed to deserialize board", e);
     return null; 
@@ -55,19 +58,37 @@ const deserializeBoard = (encoded: string): Partial<BoardState> | null => {
 const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [board, setBoard] = useState<BoardState>(() => {
+    // 1. Try URL parameters
     const params = new URLSearchParams(window.location.search);
     const shared = params.get('b');
     if (shared) {
       const decoded = deserializeBoard(shared);
-      if (decoded) return { ...decoded, pool: INITIAL_POOL_CARDS } as BoardState;
+      if (decoded) {
+        return {
+          classification: decoded.classification || [],
+          grid: decoded.grid || { strategy: {}, mechanics: {}, ux: {}, theme: {} },
+          pool: INITIAL_POOL_CARDS
+        } as BoardState;
+      }
     }
+
+    // 2. Try LocalStorage
     const saved = localStorage.getItem('tandem_architect_v3');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return { ...parsed, pool: INITIAL_POOL_CARDS };
-      } catch {}
+        // Correctly map c -> classification and g -> grid from the shorthand used in save
+        return {
+          classification: parsed.c || [],
+          grid: parsed.g || { strategy: {}, mechanics: {}, ux: {}, theme: {} },
+          pool: INITIAL_POOL_CARDS,
+        };
+      } catch (e) {
+        console.error("Failed to parse saved board", e);
+      }
     }
+
+    // 3. Fallback to default
     return {
       classification: [],
       grid: { strategy: {}, mechanics: {}, ux: {}, theme: {} },
@@ -80,7 +101,10 @@ const App: React.FC = () => {
   const [copiedType, setCopiedType] = useState<'link' | 'code' | null>(null);
 
   useEffect(() => {
-    localStorage.setItem('tandem_architect_v3', JSON.stringify({ c: board.classification, g: board.grid }));
+    localStorage.setItem('tandem_architect_v3', JSON.stringify({ 
+      c: board.classification || [], 
+      g: board.grid || {} 
+    }));
   }, [board.classification, board.grid]);
 
   const sensors = useSensors(
@@ -89,15 +113,16 @@ const App: React.FC = () => {
   );
 
   const findContainer = useCallback((id: string, currentState: BoardState) => {
-    if (id === 'pool' || currentState.pool.some(c => c.id === id)) return { row: 'pool' };
-    if (id === 'classification' || currentState.classification.some(c => c.id === id)) return { row: 'classification' };
+    if (id === 'pool' || (currentState.pool && currentState.pool.some(c => c.id === id))) return { row: 'pool' };
+    if (id === 'classification' || (currentState.classification && currentState.classification.some(c => c.id === id))) return { row: 'classification' };
     if (id.includes('::')) {
       const [row, col] = id.split('::');
       return { row, col };
     }
-    for (const [row, cols] of Object.entries(currentState.grid)) {
+    const grid = currentState.grid || {};
+    for (const [row, cols] of Object.entries(grid)) {
       for (const [col, cards] of Object.entries(cols)) {
-        if (cards.some(c => c.id === id)) return { row, col };
+        if (Array.isArray(cards) && cards.some(c => c.id === id)) return { row, col };
       }
     }
     return null;
@@ -117,16 +142,16 @@ const App: React.FC = () => {
       if (!activeLoc || !overLoc || (activeLoc.row === overLoc.row && activeLoc.col === overLoc.col)) return prev;
 
       const activeCard = activeLoc.row === 'classification'
-        ? prev.classification.find(c => c.id === activeIdStr)
+        ? (prev.classification || []).find(c => c.id === activeIdStr)
         : prev.grid[activeLoc.row!]?.[activeLoc.col!]?.find(c => c.id === activeIdStr);
 
       if (!activeCard) return prev;
-      const next = { ...prev, grid: { ...prev.grid }, classification: [...prev.classification] };
+      const next = { ...prev, grid: { ...prev.grid }, classification: [...(prev.classification || [])] };
       
       if (activeLoc.row === 'classification') {
         next.classification = next.classification.filter(c => c.id !== activeIdStr);
       } else if (activeLoc.col) {
-        next.grid[activeLoc.row!] = { ...next.grid[activeLoc.row!], [activeLoc.col!]: next.grid[activeLoc.row!][activeLoc.col!].filter(c => c.id !== activeIdStr) };
+        next.grid[activeLoc.row!] = { ...next.grid[activeLoc.row!], [activeLoc.col!]: (next.grid[activeLoc.row!][activeLoc.col!] || []).filter(c => c.id !== activeIdStr) };
       }
 
       if (overLoc.row === 'classification') {
@@ -153,9 +178,10 @@ const App: React.FC = () => {
           if (original) {
             const instance = { ...original, id: generateInstanceId(activeIdStr) };
             if (overLoc.row === 'classification') {
-              next.classification = [...next.classification, instance];
+              next.classification = [...(next.classification || []), instance];
             } else if (overLoc.col) {
-              next.grid[overLoc.row!] = { ...next.grid[overLoc.row!], [overLoc.col!]: [...(next.grid[overLoc.row!][overLoc.col!] || []), instance] };
+              const rowGrid = next.grid[overLoc.row!] || {};
+              next.grid[overLoc.row!] = { ...rowGrid, [overLoc.col!]: [...(rowGrid[overLoc.col!] || []), instance] };
             }
           }
         }
@@ -181,12 +207,14 @@ const App: React.FC = () => {
 
   const deleteCard = useCallback((cardId: string, rowId: string, colId?: string) => {
     setBoard(prev => {
-      const next = { ...prev, grid: { ...prev.grid }, classification: [...prev.classification] };
+      const next = { ...prev, grid: { ...prev.grid }, classification: [...(prev.classification || [])] };
       if (rowId === 'classification') {
         next.classification = next.classification.filter(c => c.id !== cardId);
-        Object.keys(next.grid).forEach(r => { delete next.grid[r][cardId]; });
+        Object.keys(next.grid).forEach(r => { 
+          if (next.grid[r][cardId]) delete next.grid[r][cardId]; 
+        });
       } else if (colId) {
-        next.grid[rowId] = { ...next.grid[rowId], [colId]: next.grid[rowId][colId]?.filter(c => c.id !== cardId) || [] };
+        next.grid[rowId] = { ...next.grid[rowId], [colId]: (next.grid[rowId][colId] || []).filter(c => c.id !== cardId) };
       }
       return next;
     });
@@ -220,6 +248,7 @@ const App: React.FC = () => {
       try {
         const json = JSON.parse(re.target?.result as string);
         if (json.c && json.g) setBoard({ classification: json.c, grid: json.g, pool: INITIAL_POOL_CARDS });
+        else if (json.classification && json.grid) setBoard({ classification: json.classification, grid: json.grid, pool: INITIAL_POOL_CARDS });
       } catch { alert("Invalid file format."); }
     };
     reader.readAsText(file);
@@ -229,7 +258,6 @@ const App: React.FC = () => {
   const boardCode = useMemo(() => serializeBoard(board), [board]);
   
   const shareLink = useMemo(() => {
-    // Strips existing board param from current URL to create a clean base
     const base = window.location.href.split('?')[0];
     if (boardCode) {
       return `${base}?b=${boardCode}`;
@@ -242,7 +270,6 @@ const App: React.FC = () => {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(txt);
       } else {
-        // Fallback for non-secure contexts or older browsers
         const textArea = document.createElement("textarea");
         textArea.value = txt;
         textArea.style.position = "fixed";
@@ -262,15 +289,18 @@ const App: React.FC = () => {
       setTimeout(() => setCopiedType(null), 2000);
     } catch (err) {
       console.error('Failed to copy: ', err);
-      // Final user feedback fallback
       prompt("Could not copy automatically. Please copy this code:", txt);
     }
   };
 
   const activeCard = useMemo(() => {
     if (!activeId) return null;
-    if (isPoolTemplate(activeId)) return INITIAL_POOL_CARDS.find(c => c.id === activeId) || null;
-    return [...board.classification, ...Object.values(board.grid).flatMap(r => Object.values(r).flat())].find(c => c.id === activeId) || null;
+    if (isPoolTemplate(activeId)) return (INITIAL_POOL_CARDS || []).find(c => c.id === activeId) || null;
+    const allCards = [
+      ...(board.classification || []), 
+      ...Object.values(board.grid || {}).flatMap(r => Object.values(r || {}).flat())
+    ];
+    return allCards.find(c => c.id === activeId) || null;
   }, [activeId, board]);
 
   const isBlobPreview = window.location.protocol === 'blob:';
@@ -311,8 +341,8 @@ const App: React.FC = () => {
                 <p className="text-[11px] text-gray-400 font-medium italic opacity-70">Infinite Architect Palette</p>
               </div>
               <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-4 pb-24">
-                <SortableContext items={board.pool.map(c => c.id)} strategy={verticalListSortingStrategy}>
-                  {board.pool.map(card => (
+                <SortableContext items={(board.pool || []).map(c => c.id)} strategy={verticalListSortingStrategy}>
+                  {(board.pool || []).map(card => (
                     <DraggableCard key={card.id} id={card.id} text={card.text} />
                   ))}
                 </SortableContext>
