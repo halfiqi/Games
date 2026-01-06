@@ -2,8 +2,8 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { Card } from '../types';
-import DraggableCard from './DraggableCard';
+import { Card } from '../types.ts';
+import DraggableCard from './DraggableCard.tsx';
 
 interface ColumnCellProps {
   rowId: string;

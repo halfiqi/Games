@@ -2,10 +2,10 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
-import { BoardState, CategoryId } from '../types';
-import DraggableCard from './DraggableCard';
-import ColumnCell from './ColumnCell';
-import { COLUMN_COLORS } from '../constants';
+import { BoardState, CategoryId } from '../types.ts';
+import DraggableCard from './DraggableCard.tsx';
+import ColumnCell from './ColumnCell.tsx';
+import { COLUMN_COLORS } from '../constants.tsx';
 
 interface BoardRowProps {
   id: CategoryId;

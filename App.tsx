@@ -18,10 +18,10 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { TandemLogo, INITIAL_POOL_CARDS } from './constants';
-import { BoardState, Card, CATEGORIES } from './types';
-import BoardRow from './components/BoardRow';
-import DraggableCard from './components/DraggableCard';
+import { TandemLogo, INITIAL_POOL_CARDS } from './constants.tsx';
+import { BoardState, Card, CATEGORIES } from './types.ts';
+import BoardRow from './components/BoardRow.tsx';
+import DraggableCard from './components/DraggableCard.tsx';
 import { Share2, Check, Download, Upload, X, Copy, Info, FilePlus, ExternalLink, AlertCircle, Link } from 'lucide-react';
 
 const isPoolTemplate = (id: string) => id.startsWith('p');
@@ -77,7 +77,6 @@ const App: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Correctly map c -> classification and g -> grid from the shorthand used in save
         return {
           classification: parsed.c || [],
           grid: parsed.g || { strategy: {}, mechanics: {}, ux: {}, theme: {} },
