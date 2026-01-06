@@ -27,7 +27,6 @@ import { Share2, Check, Download, Upload, X, Copy, Info, FilePlus, ExternalLink,
 const isPoolTemplate = (id: string) => id.startsWith('p');
 const generateInstanceId = (baseId: string) => `inst-${baseId}-${Math.random().toString(36).substring(2, 9)}`;
 
-// Robust base64 for URLs - using shorthands to keep URLs short
 const serializeBoard = (state: BoardState) => {
   try {
     const data = { c: state.classification || [], g: state.grid || {} };
@@ -58,7 +57,6 @@ const deserializeBoard = (encoded: string): Partial<BoardState> | null => {
 const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [board, setBoard] = useState<BoardState>(() => {
-    // 1. Try URL parameters
     const params = new URLSearchParams(window.location.search);
     const shared = params.get('b');
     if (shared) {
@@ -67,12 +65,11 @@ const App: React.FC = () => {
         return {
           classification: decoded.classification || [],
           grid: decoded.grid || { strategy: {}, mechanics: {}, ux: {}, theme: {} },
-          pool: INITIAL_POOL_CARDS
+          pool: INITIAL_POOL_CARDS || []
         } as BoardState;
       }
     }
 
-    // 2. Try LocalStorage
     const saved = localStorage.getItem('tandem_architect_v3');
     if (saved) {
       try {
@@ -80,18 +77,17 @@ const App: React.FC = () => {
         return {
           classification: parsed.c || [],
           grid: parsed.g || { strategy: {}, mechanics: {}, ux: {}, theme: {} },
-          pool: INITIAL_POOL_CARDS,
+          pool: INITIAL_POOL_CARDS || [],
         };
       } catch (e) {
         console.error("Failed to parse saved board", e);
       }
     }
 
-    // 3. Fallback to default
     return {
       classification: [],
       grid: { strategy: {}, mechanics: {}, ux: {}, theme: {} },
-      pool: INITIAL_POOL_CARDS,
+      pool: INITIAL_POOL_CARDS || [],
     };
   });
 
@@ -120,6 +116,7 @@ const App: React.FC = () => {
     }
     const grid = currentState.grid || {};
     for (const [row, cols] of Object.entries(grid)) {
+      if (!cols) continue;
       for (const [col, cards] of Object.entries(cols)) {
         if (Array.isArray(cards) && cards.some(c => c.id === id)) return { row, col };
       }
@@ -142,7 +139,7 @@ const App: React.FC = () => {
 
       const activeCard = activeLoc.row === 'classification'
         ? (prev.classification || []).find(c => c.id === activeIdStr)
-        : prev.grid[activeLoc.row!]?.[activeLoc.col!]?.find(c => c.id === activeIdStr);
+        : prev.grid?.[activeLoc.row!]?.[activeLoc.col!]?.find(c => c.id === activeIdStr);
 
       if (!activeCard) return prev;
       const next = { ...prev, grid: { ...prev.grid }, classification: [...(prev.classification || [])] };
@@ -173,7 +170,7 @@ const App: React.FC = () => {
 
       if (isPoolTemplate(activeIdStr)) {
         if (overLoc && overLoc.row !== 'pool') {
-          const original = INITIAL_POOL_CARDS.find(c => c.id === activeIdStr);
+          const original = (INITIAL_POOL_CARDS || []).find(c => c.id === activeIdStr);
           if (original) {
             const instance = { ...original, id: generateInstanceId(activeIdStr) };
             if (overLoc.row === 'classification') {
@@ -188,11 +185,11 @@ const App: React.FC = () => {
         const activeLoc = findContainer(activeIdStr, prev);
         if (activeLoc && overLoc && activeLoc.row === overLoc.row && activeLoc.col === overLoc.col) {
           if (activeLoc.row === 'classification') {
-            const oldIdx = next.classification.findIndex(c => c.id === activeIdStr);
-            const newIdx = next.classification.findIndex(c => c.id === (over.id as string));
-            next.classification = arrayMove(next.classification, oldIdx, newIdx);
+            const oldIdx = (next.classification || []).findIndex(c => c.id === activeIdStr);
+            const newIdx = (next.classification || []).findIndex(c => c.id === (over.id as string));
+            next.classification = arrayMove(next.classification || [], oldIdx, newIdx);
           } else if (activeLoc.col) {
-            const cards = [...(next.grid[activeLoc.row!][activeLoc.col!] || [])];
+            const cards = [...(next.grid?.[activeLoc.row!]?.[activeLoc.col!] || [])];
             const oldIdx = cards.findIndex(c => c.id === activeIdStr);
             const newIdx = cards.findIndex(c => c.id === (over.id as string));
             next.grid[activeLoc.row!] = { ...next.grid[activeLoc.row!], [activeLoc.col!]: arrayMove(cards, oldIdx, newIdx) };
@@ -209,8 +206,8 @@ const App: React.FC = () => {
       const next = { ...prev, grid: { ...prev.grid }, classification: [...(prev.classification || [])] };
       if (rowId === 'classification') {
         next.classification = next.classification.filter(c => c.id !== cardId);
-        Object.keys(next.grid).forEach(r => { 
-          if (next.grid[r][cardId]) delete next.grid[r][cardId]; 
+        Object.keys(next.grid || {}).forEach(r => { 
+          if (next.grid[r] && next.grid[r][cardId]) delete next.grid[r][cardId]; 
         });
       } else if (colId) {
         next.grid[rowId] = { ...next.grid[rowId], [colId]: (next.grid[rowId][colId] || []).filter(c => c.id !== cardId) };
@@ -224,7 +221,7 @@ const App: React.FC = () => {
     setBoard({
       classification: [],
       grid: { strategy: {}, mechanics: {}, ux: {}, theme: {} },
-      pool: INITIAL_POOL_CARDS
+      pool: INITIAL_POOL_CARDS || []
     });
     window.history.replaceState({}, '', window.location.pathname);
   };
@@ -246,8 +243,8 @@ const App: React.FC = () => {
     reader.onload = (re) => {
       try {
         const json = JSON.parse(re.target?.result as string);
-        if (json.c && json.g) setBoard({ classification: json.c, grid: json.g, pool: INITIAL_POOL_CARDS });
-        else if (json.classification && json.grid) setBoard({ classification: json.classification, grid: json.grid, pool: INITIAL_POOL_CARDS });
+        if (json.c && json.g) setBoard({ classification: json.c, grid: json.g, pool: INITIAL_POOL_CARDS || [] });
+        else if (json.classification && json.grid) setBoard({ classification: json.classification, grid: json.grid, pool: INITIAL_POOL_CARDS || [] });
       } catch { alert("Invalid file format."); }
     };
     reader.readAsText(file);
