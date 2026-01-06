@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -11,9 +11,6 @@ import {
   DragStartEvent,
   DragOverEvent,
   DragEndEvent,
-  pointerWithin,
-  CollisionDetection,
-  useDroppable,
 } from '@dnd-kit/core';
 import {
   arrayMove,
@@ -21,135 +18,70 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { TandemLogo, INITIAL_CARDS } from './constants';
+import { TandemLogo, INITIAL_POOL_CARDS } from './constants';
 import { BoardState, Card, CATEGORIES } from './types';
 import BoardRow from './components/BoardRow';
 import DraggableCard from './components/DraggableCard';
-import { RotateCcw, Share2, Check, Download, Upload, X, Copy, Info, FileJson, FilePlus } from 'lucide-react';
+import { Share2, Check, Download, Upload, X, Copy, Info, FilePlus, ExternalLink, AlertCircle } from 'lucide-react';
 
-// Utility to handle template vs instance IDs
-const isTemplate = (id: string) => id.startsWith('template-');
-const getTemplateId = (id: string) => id.replace('template-', '');
-const createInstanceId = (templateId: string) => `inst-${templateId}-${Math.random().toString(36).substr(2, 9)}`;
+const isPoolTemplate = (id: string) => id.startsWith('p');
+const generateInstanceId = (baseId: string) => `inst-${baseId}-${Math.random().toString(36).substring(2, 9)}`;
 
-// Fisher-Yates Shuffle Algorithm
-const shuffleArray = <T,>(array: T[]): T[] => {
-  const newArray = [...array];
-  for (let i = newArray.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-  }
-  return newArray;
-};
-
-/**
- * Robust URL-Safe Base64 Serialization
- */
-const serializeState = (state: BoardState) => {
-  const data = {
-    c: state.classification,
-    g: state.grid,
-  };
+// Robust base64 for URLs
+const serializeBoard = (state: BoardState) => {
   try {
+    const data = { c: state.classification, g: state.grid };
     const json = JSON.stringify(data);
-    const utf8Bytes = new TextEncoder().encode(json);
-    let binary = "";
-    for (let i = 0; i < utf8Bytes.byteLength; i++) {
-      binary += String.fromCharCode(utf8Bytes[i]);
-    }
-    return btoa(binary)
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-  } catch (e) {
+    return btoa(unescape(encodeURIComponent(json)))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch (e) { 
     console.error("Failed to serialize board", e);
-    return null;
+    return null; 
   }
 };
 
-const deserializeState = (encoded: string): Partial<BoardState> | null => {
-  if (!encoded) return null;
+const deserializeBoard = (encoded: string): Partial<BoardState> | null => {
   try {
-    let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-    while (base64.length % 4) base64 += '=';
-    
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    const json = new TextDecoder().decode(bytes);
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(escape(atob(base64)));
     const data = JSON.parse(json);
-    return {
-      classification: data.c,
-      grid: data.g,
-    };
-  } catch (e) {
-    console.warn("Failed to deserialize board.", e);
-    return null;
+    return { classification: data.c, grid: data.g };
+  } catch (e) { 
+    console.error("Failed to deserialize board", e);
+    return null; 
   }
-};
-
-const PoolContainer: React.FC<{ cards: Card[] }> = ({ cards }) => {
-  const { setNodeRef, isOver } = useDroppable({ id: 'pool' });
-  
-  return (
-    <div 
-      ref={setNodeRef}
-      className={`fixed top-0 right-0 w-72 h-screen bg-white/95 backdrop-blur-md border-l border-gray-200 shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.1)] z-40 transition-colors flex flex-col ${isOver ? 'bg-blue-50/50' : ''}`}
-    >
-      <div className="p-6 border-b border-gray-100 bg-white/50">
-        <h3 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em] mb-1">Component Pool</h3>
-        <p className="text-[10px] text-gray-400 font-medium">Drag items to the board</p>
-      </div>
-      
-      <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-        <div className="flex flex-col gap-3 pb-20">
-          <SortableContext items={cards.map(c => c.id)} strategy={verticalListSortingStrategy}>
-            {cards.map((card) => (
-              <DraggableCard key={card.id} id={card.id} text={card.text} />
-            ))}
-          </SortableContext>
-        </div>
-      </div>
-      
-      <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white to-transparent pointer-events-none" />
-    </div>
-  );
 };
 
 const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const initialPool = useMemo(() => {
-    const templates = INITIAL_CARDS.map(c => ({ ...c, id: `template-${c.id}` }));
-    return shuffleArray(templates);
-  }, []);
-
   const [board, setBoard] = useState<BoardState>(() => {
     const params = new URLSearchParams(window.location.search);
-    const sharedData = params.get('board');
-    if (sharedData) {
-      const deserialized = deserializeState(sharedData);
-      if (deserialized) {
-        return {
-          classification: deserialized.classification || [],
-          grid: deserialized.grid || { strategy: {}, mechanics: {}, ux: {}, theme: {} },
-          pool: initialPool,
-        };
-      }
+    const shared = params.get('b');
+    if (shared) {
+      const decoded = deserializeBoard(shared);
+      if (decoded) return { ...decoded, pool: INITIAL_POOL_CARDS } as BoardState;
+    }
+    const saved = localStorage.getItem('tandem_architect_v3');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return { ...parsed, pool: INITIAL_POOL_CARDS };
+      } catch {}
     }
     return {
       classification: [],
       grid: { strategy: {}, mechanics: {}, ux: {}, theme: {} },
-      pool: initialPool,
+      pool: INITIAL_POOL_CARDS,
     };
   });
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [importText, setImportText] = useState("");
-  const [isCopied, setIsCopied] = useState<'link' | 'code' | null>(null);
+  const [copiedType, setCopiedType] = useState<'link' | 'code' | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem('tandem_architect_v3', JSON.stringify({ c: board.classification, g: board.grid }));
+  }, [board.classification, board.grid]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -157,405 +89,301 @@ const App: React.FC = () => {
   );
 
   const findContainer = useCallback((id: string, currentState: BoardState) => {
-    if (id === 'pool') return { rowId: 'pool' };
-    if (currentState.pool.some(c => c.id === id)) return { rowId: 'pool' };
-    if (id === 'classification') return { rowId: 'classification' };
-    if (currentState.classification.some(c => c.id === id)) return { rowId: 'classification' };
+    if (id === 'pool' || currentState.pool.some(c => c.id === id)) return { row: 'pool' };
+    if (id === 'classification' || currentState.classification.some(c => c.id === id)) return { row: 'classification' };
     if (id.includes('::')) {
-      const [rowId, colId] = id.split('::');
-      return { rowId, colId };
+      const [row, col] = id.split('::');
+      return { row, col };
     }
-    for (const [rowId, columns] of Object.entries(currentState.grid)) {
-      for (const [colId, cards] of Object.entries(columns)) {
-        if (cards.some(c => c.id === id)) return { rowId, colId };
+    for (const [row, cols] of Object.entries(currentState.grid)) {
+      for (const [col, cards] of Object.entries(cols)) {
+        if (cards.some(c => c.id === id)) return { row, col };
       }
     }
     return null;
   }, []);
 
-  const collisionDetectionStrategy: CollisionDetection = useCallback((args) => {
-    const pointerCollisions = pointerWithin(args);
-    if (pointerCollisions.length > 0) return pointerCollisions;
-    return closestCenter(args);
-  }, []);
+  const handleDragStart = (e: DragStartEvent) => setActiveId(e.active.id as string);
 
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
-  };
-
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over) return;
+  const handleDragOver = (e: DragOverEvent) => {
+    const { active, over } = e;
+    if (!over || isPoolTemplate(active.id as string)) return;
     const activeIdStr = active.id as string;
-    const overId = over.id as string;
-    if (activeIdStr === overId) return;
-    if (isTemplate(activeIdStr)) return;
+    const overIdStr = over.id as string;
 
-    setBoard((prev) => {
+    setBoard(prev => {
       const activeLoc = findContainer(activeIdStr, prev);
-      const overLoc = findContainer(overId, prev);
-      if (!activeLoc || !overLoc) return prev;
-      if (activeLoc.rowId === overLoc.rowId && activeLoc.colId === overLoc.colId) return prev;
+      const overLoc = findContainer(overIdStr, prev);
+      if (!activeLoc || !overLoc || (activeLoc.row === overLoc.row && activeLoc.col === overLoc.col)) return prev;
 
-      const activeCard = activeLoc.rowId === 'classification' 
+      const activeCard = activeLoc.row === 'classification'
         ? prev.classification.find(c => c.id === activeIdStr)
-        : activeLoc.colId 
-          ? prev.grid[activeLoc.rowId][activeLoc.colId]?.find(c => c.id === activeIdStr)
-          : undefined;
+        : prev.grid[activeLoc.row!]?.[activeLoc.col!]?.find(c => c.id === activeIdStr);
 
       if (!activeCard) return prev;
-      const nextState = { ...prev };
-      nextState.grid = { ...prev.grid };
-      nextState.classification = [...prev.classification];
-
-      if (activeLoc.rowId === 'classification') {
-        nextState.classification = nextState.classification.filter(c => c.id !== activeIdStr);
-      } else if (activeLoc.colId) {
-        const rowCols = { ...nextState.grid[activeLoc.rowId] };
-        rowCols[activeLoc.colId] = (rowCols[activeLoc.colId] || []).filter(c => c.id !== activeIdStr);
-        nextState.grid[activeLoc.rowId] = rowCols;
+      const next = { ...prev, grid: { ...prev.grid }, classification: [...prev.classification] };
+      
+      if (activeLoc.row === 'classification') {
+        next.classification = next.classification.filter(c => c.id !== activeIdStr);
+      } else if (activeLoc.col) {
+        next.grid[activeLoc.row!] = { ...next.grid[activeLoc.row!], [activeLoc.col!]: next.grid[activeLoc.row!][activeLoc.col!].filter(c => c.id !== activeIdStr) };
       }
 
-      if (overLoc.rowId === 'classification') {
-        if (!nextState.classification.some(c => c.id === activeCard.id)) {
-          nextState.classification.push(activeCard);
-          Object.keys(nextState.grid).forEach(r => {
-            const rowCols = { ...nextState.grid[r] };
-            if (!rowCols[activeCard.id]) rowCols[activeCard.id] = [];
-            nextState.grid[r] = rowCols;
-          });
-        }
-      } else if (overLoc.colId) {
-        const rowCols = { ...nextState.grid[overLoc.rowId] };
-        const colCards = [...(rowCols[overLoc.colId] || [])];
-        if (!colCards.some(c => c.id === activeCard.id)) {
-          colCards.push(activeCard);
-          rowCols[overLoc.colId] = colCards;
-          nextState.grid[overLoc.rowId] = rowCols;
-        }
+      if (overLoc.row === 'classification') {
+        next.classification.push(activeCard);
+      } else if (overLoc.col) {
+        next.grid[overLoc.row!] = { ...next.grid[overLoc.row!], [overLoc.col!]: [...(next.grid[overLoc.row!][overLoc.col!] || []), activeCard] };
       }
-      return nextState;
+      return next;
     });
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
     const activeIdStr = active.id as string;
-    if (!over) {
-      setActiveId(null);
-      return;
-    }
+    if (!over) { setActiveId(null); return; }
 
-    setBoard((prev) => {
+    setBoard(prev => {
       const overLoc = findContainer(over.id as string, prev);
-      const activeLoc = findContainer(activeIdStr, prev);
-      let nextState = { ...prev };
+      const next = { ...prev };
 
-      if (isTemplate(activeIdStr)) {
-          if (overLoc && overLoc.rowId !== 'pool') {
-              const templateId = getTemplateId(activeIdStr);
-              const original = INITIAL_CARDS.find(c => c.id === templateId);
-              if (original) {
-                  const newInstance = { ...original, id: createInstanceId(templateId) };
-                  if (overLoc.rowId === 'classification') {
-                      nextState.classification = [...nextState.classification, newInstance];
-                      Object.keys(nextState.grid).forEach(r => {
-                        const rowCols = { ...nextState.grid[r] };
-                        rowCols[newInstance.id] = [];
-                        nextState.grid[r] = rowCols;
-                      });
-                  } else if (overLoc.colId) {
-                      const rowCols = { ...nextState.grid[overLoc.rowId] };
-                      rowCols[overLoc.colId] = [...(rowCols[overLoc.colId] || []), newInstance];
-                      nextState.grid[overLoc.rowId] = rowCols;
-                  }
-              }
+      if (isPoolTemplate(activeIdStr)) {
+        if (overLoc && overLoc.row !== 'pool') {
+          const original = INITIAL_POOL_CARDS.find(c => c.id === activeIdStr);
+          if (original) {
+            const instance = { ...original, id: generateInstanceId(activeIdStr) };
+            if (overLoc.row === 'classification') {
+              next.classification = [...next.classification, instance];
+            } else if (overLoc.col) {
+              next.grid[overLoc.row!] = { ...next.grid[overLoc.row!], [overLoc.col!]: [...(next.grid[overLoc.row!][overLoc.col!] || []), instance] };
+            }
           }
-      } else if (activeLoc && overLoc && activeLoc.rowId === overLoc.rowId && activeLoc.colId === overLoc.colId) {
-        if (activeLoc.rowId === 'classification') {
-          const oldIdx = nextState.classification.findIndex(c => c.id === activeIdStr);
-          const newIdx = nextState.classification.findIndex(c => c.id === (over.id as string));
-          if (oldIdx !== -1 && newIdx !== -1) {
-            nextState.classification = arrayMove(nextState.classification, oldIdx, newIdx);
-          }
-        } else if (activeLoc.rowId === 'pool') {
-          const oldIdx = nextState.pool.findIndex(c => c.id === activeIdStr);
-          const newIdx = nextState.pool.findIndex(c => c.id === (over.id as string));
-          if (oldIdx !== -1 && newIdx !== -1) {
-            nextState.pool = arrayMove(nextState.pool, oldIdx, newIdx);
-          }
-        } else if (activeLoc.colId) {
-          const colCards = nextState.grid[activeLoc.rowId][activeLoc.colId] || [];
-          const oldIdx = colCards.findIndex(c => c.id === activeIdStr);
-          const newIdx = colCards.findIndex(c => c.id === (over.id as string));
-          if (oldIdx !== -1 && newIdx !== -1) {
-            const rowCols = { ...nextState.grid[activeLoc.rowId] };
-            rowCols[activeLoc.colId] = arrayMove(colCards, oldIdx, newIdx);
-            nextState.grid[activeLoc.rowId] = rowCols;
+        }
+      } else {
+        const activeLoc = findContainer(activeIdStr, prev);
+        if (activeLoc && overLoc && activeLoc.row === overLoc.row && activeLoc.col === overLoc.col) {
+          if (activeLoc.row === 'classification') {
+            const oldIdx = next.classification.findIndex(c => c.id === activeIdStr);
+            const newIdx = next.classification.findIndex(c => c.id === (over.id as string));
+            next.classification = arrayMove(next.classification, oldIdx, newIdx);
+          } else if (activeLoc.col) {
+            const cards = [...(next.grid[activeLoc.row!][activeLoc.col!] || [])];
+            const oldIdx = cards.findIndex(c => c.id === activeIdStr);
+            const newIdx = cards.findIndex(c => c.id === (over.id as string));
+            next.grid[activeLoc.row!] = { ...next.grid[activeLoc.row!], [activeLoc.col!]: arrayMove(cards, oldIdx, newIdx) };
           }
         }
       }
-      return nextState;
+      return next;
     });
     setActiveId(null);
   };
 
-  const resetGame = () => {
-    if (!confirm("Are you sure you want to start a new board? Everything current will be lost.")) return;
-    const templates = INITIAL_CARDS.map(c => ({ ...c, id: `template-${c.id}` }));
+  const deleteCard = useCallback((cardId: string, rowId: string, colId?: string) => {
+    setBoard(prev => {
+      const next = { ...prev, grid: { ...prev.grid }, classification: [...prev.classification] };
+      if (rowId === 'classification') {
+        next.classification = next.classification.filter(c => c.id !== cardId);
+        Object.keys(next.grid).forEach(r => { delete next.grid[r][cardId]; });
+      } else if (colId) {
+        next.grid[rowId] = { ...next.grid[rowId], [colId]: next.grid[rowId][colId]?.filter(c => c.id !== cardId) || [] };
+      }
+      return next;
+    });
+  }, []);
+
+  const resetBoard = () => {
+    if (!confirm("Clear this entire board?")) return;
     setBoard({
       classification: [],
       grid: { strategy: {}, mechanics: {}, ux: {}, theme: {} },
-      pool: shuffleArray(templates),
+      pool: INITIAL_POOL_CARDS
     });
-    const url = new URL(window.location.href);
-    url.searchParams.delete('board');
-    window.history.replaceState({}, '', url.toString());
+    window.history.replaceState({}, '', window.location.pathname);
   };
 
-  const currentBoardCode = useMemo(() => serializeState(board), [board]);
-  const currentBoardLink = useMemo(() => {
-    if (!currentBoardCode) return "";
-    const url = new URL(window.location.href);
-    url.searchParams.set('board', currentBoardCode);
-    return url.toString();
-  }, [currentBoardCode]);
-
-  const copyToClipboard = (text: string, type: 'link' | 'code') => {
-    navigator.clipboard.writeText(text).then(() => {
-      setIsCopied(type);
-      setTimeout(() => setIsCopied(null), 2000);
-    });
-  };
-
-  const handleImport = (text: string) => {
-    const deserialized = deserializeState(text.trim());
-    if (deserialized) {
-      setBoard({
-        classification: deserialized.classification || [],
-        grid: deserialized.grid || { strategy: {}, mechanics: {}, ux: {}, theme: {} },
-        pool: initialPool,
-      });
-      setShowImportModal(false);
-      setImportText("");
-    } else {
-      alert("Invalid board data. Please check and try again.");
-    }
-  };
-
-  const exportToFile = () => {
+  const exportJson = () => {
     const data = JSON.stringify({ c: board.classification, g: board.grid }, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'tandem-learning-board.json';
-    link.click();
+    const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; 
+    a.download = `tandem-board-${new Date().toISOString().split('T')[0]}.json`; 
+    a.click();
     URL.revokeObjectURL(url);
   };
 
-  const importFromFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const importJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = (re) => {
       try {
-        const json = JSON.parse(event.target?.result as string);
-        if (json.c && json.g) {
-          setBoard({
-            classification: json.c,
-            grid: json.g,
-            pool: initialPool
-          });
-          alert("Board loaded successfully!");
-        }
-      } catch (err) {
-        alert("Failed to read file. Make sure it is a valid board file.");
-      }
+        const json = JSON.parse(re.target?.result as string);
+        if (json.c && json.g) setBoard({ classification: json.c, grid: json.g, pool: INITIAL_POOL_CARDS });
+      } catch { alert("Invalid file format."); }
     };
     reader.readAsText(file);
-    e.target.value = ''; // Reset input
+    e.target.value = '';
+  };
+
+  const boardCode = useMemo(() => serializeBoard(board), [board]);
+  const shareLink = useMemo(() => {
+    // If we are in a blob environment, we can't generate a stable URL
+    if (window.location.protocol === 'blob:') return "Links disabled in preview windows";
+    const url = new URL(window.location.origin + window.location.pathname);
+    if (boardCode) url.searchParams.set('b', boardCode);
+    return url.toString();
+  }, [boardCode]);
+
+  const copyToClipboard = async (txt: string, type: 'link' | 'code') => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(txt);
+      } else {
+        // Fallback for older browsers/non-secure contexts
+        const textArea = document.createElement("textarea");
+        textArea.value = txt;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedType(type);
+      setTimeout(() => setCopiedType(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy: ', err);
+      alert("Failed to copy. Please manually select the text and copy.");
+    }
   };
 
   const activeCard = useMemo(() => {
     if (!activeId) return null;
-    if (isTemplate(activeId)) {
-        return INITIAL_CARDS.find(c => `template-${c.id}` === activeId) || null;
-    }
-    const allInstances = [
-        ...board.classification,
-        ...Object.values(board.grid).flatMap(cols => Object.values(cols).flat())
-    ];
-    return allInstances.find(c => c.id === activeId) || null;
+    if (isPoolTemplate(activeId)) return INITIAL_POOL_CARDS.find(c => c.id === activeId) || null;
+    return [...board.classification, ...Object.values(board.grid).flatMap(r => Object.values(r).flat())].find(c => c.id === activeId) || null;
   }, [activeId, board]);
 
-  const isBlobUrl = window.location.protocol === 'blob:';
+  const isBlobPreview = window.location.protocol === 'blob:';
 
   return (
-    <div className="min-h-screen pr-72">
-      <header className="px-6 py-4 bg-white shadow-sm flex justify-between items-center sticky top-0 z-50">
-        <div className="flex-1 flex gap-2">
-          {/* File Menu Style Buttons */}
-          <button 
-            onClick={resetGame} 
-            className="group flex items-center gap-2 px-3 py-2 text-[10px] font-black text-gray-400 hover:text-[#1e6fb3] transition-all uppercase tracking-widest bg-gray-50 rounded-lg"
-            title="Start a new empty board"
-          >
-            <FilePlus className="w-3.5 h-3.5" />
-            New
-          </button>
-          
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 px-3 py-2 text-[10px] font-black text-gray-400 hover:text-[#1e6fb3] transition-all uppercase tracking-widest bg-gray-50 rounded-lg"
-            title="Load board from a file"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            Open
-          </button>
-          <input ref={fileInputRef} type="file" accept=".json" onChange={importFromFile} className="hidden" />
-
-          <button 
-            onClick={exportToFile}
-            className="flex items-center gap-2 px-3 py-2 text-[10px] font-black text-gray-400 hover:text-[#1e6fb3] transition-all uppercase tracking-widest bg-gray-50 rounded-lg"
-            title="Download this board as a file"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Save
-          </button>
+    <div className="min-h-screen bg-[#f1f5f9] flex flex-col">
+      <header className="sticky top-0 z-[100] bg-white border-b border-gray-200 px-8 py-5 flex justify-between items-center shadow-lg">
+        <div className="flex items-center gap-4">
+          <button onClick={resetBoard} className="p-3.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all" title="Reset Board"><FilePlus className="w-6 h-6" /></button>
+          <div className="w-px h-10 bg-gray-200 mx-2" />
+          <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2.5 px-6 py-3 text-xs font-black text-gray-500 hover:bg-gray-100 rounded-[1.2rem] transition-all uppercase tracking-widest border border-gray-100 shadow-sm"><Upload className="w-4 h-4" /> Import</button>
+          <button onClick={exportJson} className="flex items-center gap-2.5 px-6 py-3 text-xs font-black text-gray-500 hover:bg-gray-100 rounded-[1.2rem] transition-all uppercase tracking-widest border border-gray-100 shadow-sm"><Download className="w-4 h-4" /> Export</button>
+          <input ref={fileInputRef} type="file" accept=".json" onChange={importJson} className="hidden" />
         </div>
 
         <TandemLogo />
 
-        <div className="flex-1 flex justify-end">
-          <button 
-            onClick={() => setShowShareModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 text-xs font-bold bg-[#1e6fb3] text-white hover:bg-[#155a94] shadow-md hover:shadow-lg transition-all uppercase tracking-widest rounded-xl"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            Share Board
-          </button>
-        </div>
+        <button onClick={() => setShowShareModal(true)} className="flex items-center gap-3 px-10 py-4 bg-[#1e6fb3] text-white rounded-2xl font-black text-[13px] shadow-2xl hover:bg-[#165a94] transition-all uppercase tracking-[0.2em] transform active:scale-95">
+          <Share2 className="w-5 h-5" /> Share Game
+        </button>
       </header>
 
-      {/* Share Modal */}
+      <div className="flex-1 flex overflow-hidden">
+        <main className="flex-1 overflow-auto p-16 custom-scrollbar">
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+            <div className="board-texture p-16 rounded-[5rem] border border-gray-200 flex flex-col gap-12 min-w-fit shadow-2xl relative">
+              {CATEGORIES.map(cat => (
+                <BoardRow key={cat.id} id={cat.id} label={cat.label} subLabel={cat.subLabel} board={board} onDeleteCard={deleteCard} />
+              ))}
+            </div>
+
+            <aside className="fixed right-0 top-0 w-80 h-screen bg-white/95 backdrop-blur-xl border-l border-gray-100 shadow-[-15px_0_40px_rgba(0,0,0,0.05)] z-[90] flex flex-col">
+              <div className="p-10 border-b border-gray-50">
+                <h3 className="text-[12px] font-black uppercase tracking-[0.4em] text-gray-400 mb-2">Component Pool</h3>
+                <p className="text-[11px] text-gray-400 font-medium italic opacity-70">Infinite Architect Palette</p>
+              </div>
+              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-4 pb-24">
+                <SortableContext items={board.pool.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                  {board.pool.map(card => (
+                    <DraggableCard key={card.id} id={card.id} text={card.text} />
+                  ))}
+                </SortableContext>
+              </div>
+            </aside>
+
+            <DragOverlay dropAnimation={null}>
+              {activeCard && (
+                <div className="px-10 py-5 bg-white border-2 border-[#1e2d4d] text-[#1e2d4d] rounded-2xl shadow-[0_40px_80px_-15px_rgba(0,0,0,0.3)] font-bold transform rotate-6 min-w-[180px] text-center scale-110">
+                  {activeCard.text}
+                </div>
+              )}
+            </DragOverlay>
+          </DndContext>
+        </main>
+      </div>
+
       {showShareModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-8 relative">
-            <button onClick={() => setShowShareModal(false)} className="absolute top-6 right-6 p-2 hover:bg-gray-100 rounded-full text-gray-400">
-              <X className="w-5 h-5" />
-            </button>
-            <h2 className="text-2xl font-bold text-[#1e2d4d] mb-2">Share Board</h2>
-            <p className="text-gray-500 text-sm mb-6">Choose a method to share your board with others.</p>
+        <div className="fixed inset-0 z-[200] bg-[#1e2d4d]/70 backdrop-blur-xl flex items-center justify-center p-8 animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-2xl rounded-[4rem] shadow-2xl p-14 relative animate-in zoom-in duration-300">
+            <button onClick={() => setShowShareModal(false)} className="absolute top-10 right-10 p-4 text-gray-400 hover:bg-gray-100 rounded-full transition-colors"><X className="w-7 h-7" /></button>
+            
+            <div className="mb-12 text-center">
+              <h2 className="text-4xl font-black text-[#1e2d4d] mb-3">Share Your Architecture</h2>
+              <p className="text-gray-500 font-medium text-lg">Send this board to your team or client.</p>
+            </div>
 
-            <div className="space-y-6">
-              {/* File Export (New Primary Method) */}
-              <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <FileJson className="w-5 h-5 text-[#1e6fb3]" />
-                  <h3 className="font-bold text-[#1e2d4d] text-sm uppercase tracking-wide">Method 1: File Transfer (Best)</h3>
-                </div>
-                <p className="text-xs text-[#1e2d4d]/70 mb-4 leading-relaxed">Download a board file and send it directly to your friend. They can use the "Open" button to load it.</p>
-                <button 
-                  onClick={exportToFile}
-                  className="w-full flex items-center justify-center gap-2 bg-white text-[#1e6fb3] py-2.5 rounded-xl border border-[#1e6fb3]/20 font-bold text-xs hover:bg-blue-100 transition-all uppercase tracking-widest"
-                >
-                  <Download className="w-4 h-4" />
-                  Download .json file
-                </button>
-              </div>
-
-              {/* Option 2: Code */}
-              <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Method 2: Board Code</label>
-                <div className="flex gap-2">
-                  <input readOnly value={currentBoardCode || ""} className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-xs text-gray-600 font-mono outline-none" />
-                  <button onClick={() => copyToClipboard(currentBoardCode || "", 'code')} className={`px-4 rounded-xl transition-all ${isCopied === 'code' ? 'bg-green-500 text-white' : 'bg-gray-100 text-[#1e2d4d] hover:bg-gray-200'}`}>
-                    {isCopied === 'code' ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Option 3: Link (with disclaimer) */}
-              <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Method 3: Shareable Link</label>
-                <div className="flex gap-2">
-                  <input readOnly value={currentBoardLink} className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-xs text-gray-600 outline-none" />
-                  <button onClick={() => copyToClipboard(currentBoardLink, 'link')} className={`px-4 rounded-xl transition-all ${isCopied === 'link' ? 'bg-green-500 text-white' : 'bg-gray-100 text-[#1e2d4d] hover:bg-gray-200'}`}>
-                    {isCopied === 'link' ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                  </button>
-                </div>
-                {isBlobUrl && (
-                  <div className="mt-3 flex items-start gap-2 text-amber-600 bg-amber-50 p-3 rounded-lg text-[10px] leading-relaxed">
-                    <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>Links only work if you publish this app to a website (like Vercel). For now, use <strong>Method 1 or 2</strong> to share between laptops.</span>
+            <div className="space-y-10">
+              {/* Conditional Warning for Blob Previews */}
+              {isBlobPreview && (
+                <div className="p-6 bg-amber-50 border border-amber-200 rounded-[2rem] flex gap-4">
+                  <AlertCircle className="w-6 h-6 text-amber-600 shrink-0" />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-black text-amber-800 uppercase tracking-widest">Preview Mode Active</h4>
+                    <p className="text-xs text-amber-700 leading-relaxed">
+                      You are running in a temporary preview environment. <strong>Share Links will not work</strong> until you deploy to GitHub Pages.
+                      Please use the <strong>Export Board</strong> option below instead.
+                    </p>
                   </div>
-                )}
+                </div>
+              )}
+
+              <div className="group">
+                <label className="text-[11px] font-black uppercase tracking-[0.3em] text-gray-400 mb-4 block group-hover:text-[#1e6fb3] transition-colors">Direct Link (GitHub Pages Only)</label>
+                <div className="flex gap-4">
+                  <input readOnly value={shareLink} disabled={isBlobPreview} className="flex-1 bg-gray-50 border border-gray-200 rounded-3xl px-7 py-5 text-sm text-gray-600 outline-none focus:ring-4 focus:ring-[#1e6fb3]/10 disabled:opacity-50" />
+                  <button 
+                    disabled={isBlobPreview}
+                    onClick={() => copyToClipboard(shareLink, 'link')} 
+                    className={`px-10 rounded-3xl transition-all shadow-xl disabled:bg-gray-200 disabled:shadow-none ${copiedType === 'link' ? 'bg-green-500 text-white' : 'bg-[#1e6fb3] text-white hover:bg-[#165a94] transform active:scale-95'}`}>
+                    {copiedType === 'link' ? <Check className="w-6 h-6" /> : <Copy className="w-6 h-6" />}
+                  </button>
+                </div>
               </div>
+
+              <div className="p-8 bg-[#f8fafc] rounded-[2.5rem] border border-gray-100 space-y-4">
+                <div className="flex justify-between items-center">
+                  <label className="text-[11px] font-black uppercase tracking-[0.3em] text-[#1e6fb3]">Reliable Sharing Options</label>
+                  <span className="text-[10px] bg-[#1e6fb3]/10 text-[#1e6fb3] px-3 py-1 rounded-full font-bold uppercase tracking-widest">Recommended</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <button onClick={exportJson} className="flex flex-col items-center justify-center p-6 bg-white border border-gray-200 rounded-3xl hover:border-[#1e6fb3] hover:shadow-xl transition-all group">
+                    <Download className="w-8 h-8 text-gray-400 group-hover:text-[#1e6fb3] mb-3" />
+                    <span className="text-xs font-black uppercase tracking-widest text-gray-600">Download .json</span>
+                    <span className="text-[9px] text-gray-400 mt-1">Best for backup & file share</span>
+                  </button>
+                  
+                  <button onClick={() => copyToClipboard(boardCode || '', 'code')} className="flex flex-col items-center justify-center p-6 bg-white border border-gray-200 rounded-3xl hover:border-[#1e6fb3] hover:shadow-xl transition-all group">
+                    {copiedType === 'code' ? <Check className="w-8 h-8 text-green-500 mb-3" /> : <Copy className="w-8 h-8 text-gray-400 group-hover:text-[#1e6fb3] mb-3" />}
+                    <span className="text-xs font-black uppercase tracking-widest text-gray-600">{copiedType === 'code' ? 'Copied!' : 'Copy Board ID'}</span>
+                    <span className="text-[9px] text-gray-400 mt-1">Transfer code for team</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-12 pt-10 border-t border-gray-100 flex justify-center">
+              <a href="https://github.com" target="_blank" rel="noreferrer" className="flex items-center gap-3 text-sm font-black text-gray-400 hover:text-[#1e2d4d] transition-colors uppercase tracking-widest">
+                Host this board on GitHub Pages <ExternalLink className="w-5 h-5" />
+              </a>
             </div>
           </div>
         </div>
       )}
-
-      {/* Import Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-8 relative">
-            <button onClick={() => setShowImportModal(false)} className="absolute top-6 right-6 p-2 hover:bg-gray-100 rounded-full text-gray-400">
-              <X className="w-5 h-5" />
-            </button>
-            <h2 className="text-2xl font-bold text-[#1e2d4d] mb-2 text-center">Import Board</h2>
-            <p className="text-gray-500 text-sm mb-6 text-center">Paste a board code below to load its configuration.</p>
-
-            <textarea 
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              placeholder="Paste code here..."
-              className="w-full h-32 bg-gray-50 border border-gray-200 rounded-2xl p-4 text-sm font-mono outline-none focus:ring-2 focus:ring-[#1e6fb3]/20 mb-6 resize-none"
-            />
-
-            <button 
-              onClick={() => handleImport(importText)}
-              disabled={!importText.trim()}
-              className="w-full bg-[#1e6fb3] text-white py-4 rounded-2xl font-bold hover:bg-[#155a94] transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Load Board
-            </button>
-          </div>
-        </div>
-      )}
-
-      <main className="max-w-[1700px] mx-auto p-8">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={collisionDetectionStrategy}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-        >
-          <div className="board-texture flex flex-col gap-6 p-10 rounded-[2.5rem] border border-gray-200">
-            {CATEGORIES.map((cat) => (
-              <BoardRow
-                key={cat.id}
-                id={cat.id}
-                label={cat.label}
-                subLabel={cat.subLabel}
-                board={board}
-              />
-            ))}
-          </div>
-
-          <PoolContainer cards={board.pool} />
-
-          <DragOverlay dropAnimation={null}>
-            {activeId && activeCard ? (
-              <div className="px-5 py-3 bg-white border-2 border-[#1e2d4d] rounded-2xl shadow-2xl flex items-center justify-center min-w-[140px] transform rotate-2 pointer-events-none">
-                <span className="text-sm font-bold text-[#1e2d4d]">{activeCard.text}</span>
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      </main>
     </div>
   );
 };

@@ -4,11 +4,10 @@ export interface Card {
   text: string;
 }
 
-export type CategoryId = 'classification' | 'strategy' | 'mechanics' | 'ux' | 'theme' | 'pool';
+export type CategoryId = 'classification' | 'strategy' | 'mechanics' | 'ux' | 'theme';
 
 export interface BoardState {
   classification: Card[];
-  // grid[rowId][classificationCardId] = Card[]
   grid: Record<string, Record<string, Card[]>>;
   pool: Card[];
 }

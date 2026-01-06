@@ -12,71 +12,72 @@ interface BoardRowProps {
   label: string;
   subLabel?: string;
   board: BoardState;
+  onDeleteCard: (cardId: string, rowId: string, colId?: string) => void;
 }
 
-const BoardRow: React.FC<BoardRowProps> = ({ id, label, subLabel, board }) => {
+const BoardRow: React.FC<BoardRowProps> = ({ id, label, subLabel, board, onDeleteCard }) => {
   const isClassification = id === 'classification';
-  
   const { setNodeRef, isOver } = useDroppable({ 
-    id: id,
+    id, 
     disabled: !isClassification 
   });
 
-  const columns = board.classification;
+  const activeCols = board.classification;
 
   return (
-    <div className="flex gap-4 items-stretch min-h-[160px]">
+    <div className="flex gap-10 items-stretch min-h-[180px]">
       {/* Row Label */}
-      <div className={`w-56 flex flex-col justify-center pr-8 border-r-2 border-dashed border-gray-300 transition-all ${isClassification ? 'bg-[#1e2d4d] rounded-xl text-white p-6 border-none shadow-xl' : ''}`}>
-        <span className={`text-4xl font-handwritten leading-none mb-1 ${isClassification ? 'text-white' : 'text-[#1e2d4d]'}`}>
+      <div className={`w-72 shrink-0 flex flex-col justify-center pr-12 border-r-2 border-dashed border-gray-200 transition-all ${isClassification ? 'bg-[#1e2d4d] text-white rounded-[2.5rem] px-10 shadow-2xl border-none ring-8 ring-[#1e2d4d]/5' : ''}`}>
+        <span className={`text-5xl font-handwritten leading-none tracking-tight ${isClassification ? 'text-white' : 'text-[#1e2d4d]'}`}>
           {label}
         </span>
         {subLabel && (
-          <span className={`text-3xl font-handwritten leading-tight ${isClassification ? 'text-white opacity-80' : 'text-[#1e2d4d] opacity-60'}`}>
+          <span className={`text-2xl font-handwritten opacity-50 leading-tight mt-1 ${isClassification ? 'text-blue-100' : 'text-[#1e2d4d]'}`}>
             {subLabel}
           </span>
         )}
       </div>
 
       {/* Row Content */}
-      <div className="flex-1 flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+      <div className="flex-1 flex gap-8 overflow-x-auto pb-8 scrollbar-hide items-center">
         {isClassification ? (
           <div
             ref={setNodeRef}
-            className={`flex-1 flex gap-4 min-w-[200px] items-center p-4 rounded-2xl border-2 transition-all ${isOver ? 'bg-blue-50 border-blue-400' : 'bg-white/50 border-transparent'}`}
+            className={`flex-1 flex gap-6 min-w-[250px] items-center p-8 rounded-[3rem] border-2 transition-all ${isOver ? 'bg-blue-50/50 border-blue-400 border-dashed' : 'bg-white/20 border-transparent'}`}
           >
-            <SortableContext items={columns.map(c => c.id)} strategy={horizontalListSortingStrategy}>
-              {columns.map((card, index) => (
+            <SortableContext items={activeCols.map(c => c.id)} strategy={horizontalListSortingStrategy}>
+              {activeCols.map((card, idx) => (
                 <DraggableCard 
                   key={card.id} 
                   id={card.id} 
                   text={card.text} 
                   isHeader 
-                  headerColor={COLUMN_COLORS[index % COLUMN_COLORS.length]}
+                  headerColor={COLUMN_COLORS[idx % COLUMN_COLORS.length]}
+                  onDelete={() => onDeleteCard(card.id, 'classification')}
                 />
               ))}
             </SortableContext>
-            {columns.length === 0 && (
-              <div className="flex-1 flex items-center justify-center text-gray-400 font-medium italic text-lg text-center">
+            {activeCols.length === 0 && (
+              <div className="flex-1 flex items-center justify-center text-gray-300 font-black uppercase tracking-[0.3em] text-[11px] opacity-50 animate-pulse">
                 Drag cards here to create columns
               </div>
             )}
           </div>
         ) : (
-          <div className="flex-1 flex gap-4">
-            {columns.length > 0 ? (
-              columns.map((colCard, index) => (
-                <ColumnCell
-                  key={colCard.id}
-                  rowId={id}
-                  colId={colCard.id}
-                  items={board.grid[id]?.[colCard.id] || []}
-                  accentColor={COLUMN_COLORS[index % COLUMN_COLORS.length]}
-                />
-              ))
-            ) : (
-              <div className="flex-1 flex items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50/30">
-                <span className="text-xs text-gray-400 font-bold uppercase tracking-[0.2em]">Add Learning Classifications First</span>
+          <div className="flex-1 flex gap-8">
+            {activeCols.map((col, idx) => (
+              <ColumnCell
+                key={col.id}
+                rowId={id}
+                colId={col.id}
+                items={board.grid[id]?.[col.id] || []}
+                accentColor={COLUMN_COLORS[idx % COLUMN_COLORS.length]}
+                onDeleteCard={onDeleteCard}
+              />
+            ))}
+            {activeCols.length === 0 && (
+              <div className="flex-1 flex items-center justify-center rounded-[3rem] border-2 border-dashed border-gray-200 bg-gray-50/20">
+                <span className="text-[11px] font-black uppercase tracking-[0.3em] text-gray-200">Awaiting Columns</span>
               </div>
             )}
           </div>

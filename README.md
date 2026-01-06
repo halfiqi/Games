@@ -1,20 +1,26 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
 
-# Run and deploy your AI Studio app
+# 🎯 Tandem Learning Architect Board
 
-This contains everything you need to run your app locally.
+A high-fidelity interactive whiteboard for designing game-based learning experiences.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1xoU5tjPN8_qLH_BEq4hdPnb34R8iFHm_
+## 🚀 Deployment
+This app is designed to run on **GitHub Pages**. 
+1. Go to **Settings > Pages**.
+2. Set Source to **Deploy from a branch**.
+3. Select **main** and **/ (root)**.
+4. Hit **Save**.
 
-## Run Locally
+## 🛠 Features
+- **Infinite Pool**: Drag items from the sidebar to create "clones" on the board.
+- **Dynamic Columns**: Dropping a card in the top "Learning Classification" row creates a new design vertical.
+- **Multi-Row Architecture**: Map out Strategy, Mechanics, UX, and Theme for every classification.
+- **Save & Share**:
+    - **JSON Export**: Save your board as a file.
+    - **Direct Link**: Share your design via a URL.
+    - **Local Save**: Automatically remembers your work in your browser.
 
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 📝 Usage
+1. Drag "Classification" cards to the top row.
+2. Build the column by dragging supporting cards into the rows beneath.
+3. Use the **Trash** icon on any card to remove it.
+4. Click **Share Game** to collaborate.
