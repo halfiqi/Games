@@ -22,7 +22,7 @@ import { TandemLogo, INITIAL_POOL_CARDS } from './constants';
 import { BoardState, Card, CATEGORIES } from './types';
 import BoardRow from './components/BoardRow';
 import DraggableCard from './components/DraggableCard';
-import { Share2, Check, Download, Upload, X, Copy, Info, FilePlus, ExternalLink, AlertCircle } from 'lucide-react';
+import { Share2, Check, Download, Upload, X, Copy, Info, FilePlus, ExternalLink, AlertCircle, Link } from 'lucide-react';
 
 const isPoolTemplate = (id: string) => id.startsWith('p');
 const generateInstanceId = (baseId: string) => `inst-${baseId}-${Math.random().toString(36).substring(2, 9)}`;
@@ -227,32 +227,43 @@ const App: React.FC = () => {
   };
 
   const boardCode = useMemo(() => serializeBoard(board), [board]);
+  
   const shareLink = useMemo(() => {
-    // If we are in a blob environment, we can't generate a stable URL
-    if (window.location.protocol === 'blob:') return "Links disabled in preview windows";
-    const url = new URL(window.location.origin + window.location.pathname);
-    if (boardCode) url.searchParams.set('b', boardCode);
-    return url.toString();
+    // Strips existing board param from current URL to create a clean base
+    const base = window.location.href.split('?')[0];
+    if (boardCode) {
+      return `${base}?b=${boardCode}`;
+    }
+    return base;
   }, [boardCode]);
 
   const copyToClipboard = async (txt: string, type: 'link' | 'code') => {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+      if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(txt);
       } else {
-        // Fallback for older browsers/non-secure contexts
+        // Fallback for non-secure contexts or older browsers
         const textArea = document.createElement("textarea");
         textArea.value = txt;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
         document.body.appendChild(textArea);
+        textArea.focus();
         textArea.select();
-        document.execCommand('copy');
+        try {
+          document.execCommand('copy');
+        } catch (err) {
+          console.error('Fallback copy failed', err);
+        }
         document.body.removeChild(textArea);
       }
       setCopiedType(type);
       setTimeout(() => setCopiedType(null), 2000);
     } catch (err) {
       console.error('Failed to copy: ', err);
-      alert("Failed to copy. Please manually select the text and copy.");
+      // Final user feedback fallback
+      prompt("Could not copy automatically. Please copy this code:", txt);
     }
   };
 
@@ -277,7 +288,10 @@ const App: React.FC = () => {
 
         <TandemLogo />
 
-        <button onClick={() => setShowShareModal(true)} className="flex items-center gap-3 px-10 py-4 bg-[#1e6fb3] text-white rounded-2xl font-black text-[13px] shadow-2xl hover:bg-[#165a94] transition-all uppercase tracking-[0.2em] transform active:scale-95">
+        <button 
+          onClick={() => setShowShareModal(true)} 
+          className="flex items-center gap-3 px-10 py-4 bg-[#1e6fb3] text-white rounded-2xl font-black text-[13px] shadow-2xl hover:bg-[#165a94] transition-all uppercase tracking-[0.2em] transform active:scale-95"
+        >
           <Share2 className="w-5 h-5" /> Share Game
         </button>
       </header>
@@ -327,50 +341,58 @@ const App: React.FC = () => {
             </div>
 
             <div className="space-y-10">
-              {/* Conditional Warning for Blob Previews */}
               {isBlobPreview && (
                 <div className="p-6 bg-amber-50 border border-amber-200 rounded-[2rem] flex gap-4">
                   <AlertCircle className="w-6 h-6 text-amber-600 shrink-0" />
                   <div className="space-y-2">
-                    <h4 className="text-sm font-black text-amber-800 uppercase tracking-widest">Preview Mode Active</h4>
+                    <h4 className="text-sm font-black text-amber-800 uppercase tracking-widest">Share Preview</h4>
                     <p className="text-xs text-amber-700 leading-relaxed">
-                      You are running in a temporary preview environment. <strong>Share Links will not work</strong> until you deploy to GitHub Pages.
-                      Please use the <strong>Export Board</strong> option below instead.
+                      You are in a preview window. The generated link contains your board data but will only work permanently once you deploy to <strong>GitHub Pages</strong>.
                     </p>
                   </div>
                 </div>
               )}
 
               <div className="group">
-                <label className="text-[11px] font-black uppercase tracking-[0.3em] text-gray-400 mb-4 block group-hover:text-[#1e6fb3] transition-colors">Direct Link (GitHub Pages Only)</label>
+                <div className="flex justify-between items-center mb-4">
+                   <label className="text-[11px] font-black uppercase tracking-[0.3em] text-gray-400 group-hover:text-[#1e6fb3] transition-colors">Direct Share Link</label>
+                   {isBlobPreview && <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-bold uppercase tracking-widest">Temporary URL</span>}
+                </div>
                 <div className="flex gap-4">
-                  <input readOnly value={shareLink} disabled={isBlobPreview} className="flex-1 bg-gray-50 border border-gray-200 rounded-3xl px-7 py-5 text-sm text-gray-600 outline-none focus:ring-4 focus:ring-[#1e6fb3]/10 disabled:opacity-50" />
+                  <div className="relative flex-1">
+                    <input 
+                      readOnly 
+                      value={shareLink} 
+                      className="w-full bg-gray-50 border border-gray-200 rounded-3xl px-7 py-5 text-sm text-gray-600 outline-none focus:ring-4 focus:ring-[#1e6fb3]/10 pr-12" 
+                    />
+                    <Link className="absolute right-5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-300" />
+                  </div>
                   <button 
-                    disabled={isBlobPreview}
                     onClick={() => copyToClipboard(shareLink, 'link')} 
-                    className={`px-10 rounded-3xl transition-all shadow-xl disabled:bg-gray-200 disabled:shadow-none ${copiedType === 'link' ? 'bg-green-500 text-white' : 'bg-[#1e6fb3] text-white hover:bg-[#165a94] transform active:scale-95'}`}>
+                    className={`px-10 rounded-3xl transition-all shadow-xl ${copiedType === 'link' ? 'bg-green-500 text-white' : 'bg-[#1e6fb3] text-white hover:bg-[#165a94] transform active:scale-95'}`}>
                     {copiedType === 'link' ? <Check className="w-6 h-6" /> : <Copy className="w-6 h-6" />}
                   </button>
                 </div>
+                <p className="mt-4 text-[10px] text-gray-400 italic">This link encodes your board state. Large boards result in longer links.</p>
               </div>
 
               <div className="p-8 bg-[#f8fafc] rounded-[2.5rem] border border-gray-100 space-y-4">
                 <div className="flex justify-between items-center">
-                  <label className="text-[11px] font-black uppercase tracking-[0.3em] text-[#1e6fb3]">Reliable Sharing Options</label>
-                  <span className="text-[10px] bg-[#1e6fb3]/10 text-[#1e6fb3] px-3 py-1 rounded-full font-bold uppercase tracking-widest">Recommended</span>
+                  <label className="text-[11px] font-black uppercase tracking-[0.3em] text-[#1e6fb3]">Pro Sharing & Backups</label>
+                  <span className="text-[10px] bg-[#1e6fb3]/10 text-[#1e6fb3] px-3 py-1 rounded-full font-bold uppercase tracking-widest">Safe</span>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
                   <button onClick={exportJson} className="flex flex-col items-center justify-center p-6 bg-white border border-gray-200 rounded-3xl hover:border-[#1e6fb3] hover:shadow-xl transition-all group">
                     <Download className="w-8 h-8 text-gray-400 group-hover:text-[#1e6fb3] mb-3" />
-                    <span className="text-xs font-black uppercase tracking-widest text-gray-600">Download .json</span>
-                    <span className="text-[9px] text-gray-400 mt-1">Best for backup & file share</span>
+                    <span className="text-xs font-black uppercase tracking-widest text-gray-600">Save as File</span>
+                    <span className="text-[9px] text-gray-400 mt-1">Export to .json</span>
                   </button>
                   
                   <button onClick={() => copyToClipboard(boardCode || '', 'code')} className="flex flex-col items-center justify-center p-6 bg-white border border-gray-200 rounded-3xl hover:border-[#1e6fb3] hover:shadow-xl transition-all group">
                     {copiedType === 'code' ? <Check className="w-8 h-8 text-green-500 mb-3" /> : <Copy className="w-8 h-8 text-gray-400 group-hover:text-[#1e6fb3] mb-3" />}
-                    <span className="text-xs font-black uppercase tracking-widest text-gray-600">{copiedType === 'code' ? 'Copied!' : 'Copy Board ID'}</span>
-                    <span className="text-[9px] text-gray-400 mt-1">Transfer code for team</span>
+                    <span className="text-xs font-black uppercase tracking-widest text-gray-600">{copiedType === 'code' ? 'Copied!' : 'Copy Code'}</span>
+                    <span className="text-[9px] text-gray-400 mt-1">Raw transfer data</span>
                   </button>
                 </div>
               </div>
@@ -378,7 +400,7 @@ const App: React.FC = () => {
 
             <div className="mt-12 pt-10 border-t border-gray-100 flex justify-center">
               <a href="https://github.com" target="_blank" rel="noreferrer" className="flex items-center gap-3 text-sm font-black text-gray-400 hover:text-[#1e2d4d] transition-colors uppercase tracking-widest">
-                Host this board on GitHub Pages <ExternalLink className="w-5 h-5" />
+                Host permanently on GitHub Pages <ExternalLink className="w-5 h-5" />
               </a>
             </div>
           </div>
